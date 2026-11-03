@@ -81,7 +81,9 @@
     .lamp { width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: #d6dddd; }
     .approach.open .lamp { background: var(--green); }
     .approach.attention .lamp { background: #c27812; }
+    .approach.night .lamp { background: #c27812; animation: night-blink 1s steps(1, end) infinite; }
     .approach.closed .lamp { background: var(--red); }
+    @keyframes night-blink { 50% { opacity: .16; } }
     .north { grid-column: 2; grid-row: 1; }
     .west { grid-column: 1; grid-row: 2; }
     .center { grid-column: 2; grid-row: 2; display: grid; place-items: center; background: #eef2f2; color: #546061; border-radius: 6px; font-size: 12px; text-align: center; padding: 8px; line-height: 1.35; }
@@ -93,6 +95,8 @@
     .action:hover:not(:disabled) { border-color: #829394; background: var(--raised); }
     .action.attention-action { border-color: #dbb27a; background: #fffaf2; }
     .action.attention-action:hover:not(:disabled) { background: #fff2dc; }
+    .action.night-action { border-color: #c6a252; background: #fffdf5; }
+    .action.night-action:hover:not(:disabled) { background: #fff7df; }
     .action.auto-action { grid-column: 1 / -1; min-height: 46px; text-align: center; background: #f4f6f6; }
     .feedback { min-height: 22px; margin: 12px 0 0; color: var(--muted); font-size: 13px; }
     .feed { margin-top: 22px; }
@@ -131,7 +135,7 @@
       .action.auto-action { grid-column: auto; }
       .feed-row { grid-template-columns: 58px 8px 1fr; gap: 8px; }
     }
-    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } .approach.night .lamp { animation: none; } }
   </style>
 </head>
 <body>
@@ -207,6 +211,7 @@
             <button class="action command-button" type="button" data-action="ambulancia" data-via="leste" disabled>Prioridade Leste<span>Solicitar abertura da via Leste</span></button>
             <button class="action command-button" type="button" data-action="ambulancia" data-via="oeste" disabled>Prioridade Oeste<span>Solicitar abertura da via Oeste</span></button>
             <button class="action attention-action command-button" type="button" data-action="atencao" disabled>Atenção<span>Solicitar todos os sentidos amarelos</span></button>
+            <button class="action night-action command-button" type="button" data-action="madrugada" disabled>Madrugada<span>Amarelo piscando em todas as vias</span></button>
             <button class="action auto-action command-button" type="button" data-action="automatico" disabled>Retomar ciclo automático</button>
           </div>
           <p class="feedback" id="feedback" role="status" aria-live="polite">Conecte-se para habilitar os comandos.</p>
@@ -287,6 +292,9 @@
           if (payload.destino === 'atencao') {
             return { title: 'Transição segura', detail: 'Todos vermelhos antes de ativar Atenção.', kind: 'transition' };
           }
+          if (payload.destino === 'madrugada') {
+            return { title: 'Transição segura', detail: 'Todos vermelhos antes de ativar o modo Madrugada.', kind: 'transition' };
+          }
           return {
             title: 'Transição segura',
             detail: via ? `Todos vermelhos. Retomando o ciclo pela via ${via}.` : 'Todos vermelhos antes de retomar o ciclo.',
@@ -299,6 +307,9 @@
         }
         if (payload.modo === 'atencao') {
           return { title: 'Modo Atenção ativado', detail: 'Todos os semáforos estão amarelos.', kind: 'attention' };
+        }
+        if (payload.modo === 'madrugada') {
+          return { title: 'Modo Madrugada ativado', detail: 'Todos os sinais amarelos estão piscando.', kind: 'attention' };
         }
         if (payload.modo === 'automatico' && via && payload.etapa === 'verde') {
           return { title: `Via ${via} aberta`, detail: 'Ciclo automático', kind: 'open' };
@@ -315,11 +326,12 @@
         const modeValue = document.querySelector('#mode-value');
         const modeDetail = document.querySelector('#mode-detail');
         const stateTime = document.querySelector('#state-time');
-        document.querySelectorAll('.approach').forEach((node) => node.classList.remove('open', 'attention', 'closed'));
+        document.querySelectorAll('.approach').forEach((node) => node.classList.remove('open', 'attention', 'night', 'closed'));
 
         if (mode === 'transicao') {
           const destination = payload.destino === 'ambulancia' ? 'prioridade de ambulância'
             : payload.destino === 'atencao' ? 'modo Atenção'
+            : payload.destino === 'madrugada' ? 'modo Madrugada'
             : 'ciclo automático';
           modeValue.textContent = 'Troca segura';
           modeDetail.textContent = viaNames[via]
@@ -335,6 +347,10 @@
           modeValue.textContent = 'Atenção';
           modeDetail.textContent = 'Todos os sentidos em amarelo';
           document.querySelectorAll('.approach').forEach((node) => node.classList.add('attention'));
+        } else if (mode === 'madrugada') {
+          modeValue.textContent = 'Modo Madrugada';
+          modeDetail.textContent = 'Todos os sinais amarelos piscando';
+          document.querySelectorAll('.approach').forEach((node) => node.classList.add('night'));
         } else if (mode === 'automatico') {
           modeValue.textContent = 'Ciclo automático';
           const estadoVia = payload.etapa === 'verde' ? 'aberta'
