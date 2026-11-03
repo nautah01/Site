@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f2f5f5">
+  <title>Painel do cruzamento</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/mqtt@5.16.1/dist/mqtt.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --ground: #f2f5f5;
+      --frame: #e9efef;
+      --paper: #fff;
+      --raised: #f6f8f8;
+      --border: #e1e6e6;
+      --rule: #edf0f0;
+      --ink: #172021;
+      --muted: #586566;
+      --teal: #176779;
+      --green: #246b4b;
+      --amber: #8a4b08;
+      --red: #a42e31;
+      --radius: 16px;
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--ground);
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--ground); }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible { outline: 3px solid #70aab5; outline-offset: 2px; }
+    .app-frame { min-height: 100vh; padding: 0 0 8px 228px; background: var(--frame); }
+    .topbar { height: 56px; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; color: #435254; }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
+    .mark { width: 24px; height: 24px; position: relative; display: inline-block; }
+    .mark::before, .mark::after { content: ""; position: absolute; background: var(--teal); border-radius: 2px; }
+    .mark::before { width: 7px; height: 24px; left: 8.5px; top: 0; }
+    .mark::after { height: 7px; width: 24px; top: 8.5px; left: 0; }
+    .top-meta { color: var(--muted); font-size: 13px; }
+    main { min-height: calc(100vh - 64px); margin: 0 8px 0 0; padding: 26px clamp(18px, 3vw, 40px) 40px; background: var(--paper); border: 1px solid var(--border); border-radius: var(--radius); }
+    h1 { margin: 0; font-size: 26px; line-height: 1.15; font-weight: 600; letter-spacing: -0.025em; }
+    .intro { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 26px; }
+    .intro-copy { max-width: 540px; }
+    .intro-copy p:last-child { margin: 8px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+    .connection { min-width: 290px; max-width: 420px; }
+    .connection-form { display: grid; grid-template-columns: minmax(0, 1fr) 112px; gap: 8px; align-items: end; }
+    .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+    .field label { color: var(--muted); font-size: 12px; }
+    .field input { min-width: 0; height: 38px; border: 1px solid #cdd4d4; border-radius: 6px; padding: 0 10px; color: var(--ink); background: #fff; }
+    .credentials { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+    .primary, .secondary, .action { min-height: 44px; border-radius: 6px; font-weight: 600; transition: background-color .15s ease, border-color .15s ease, transform .15s ease; }
+    .primary { border: 1px solid #173b42; background: #173b42; color: white; }
+    .primary:hover:not(:disabled) { background: #24545c; }
+    .secondary { border: 1px solid #cbd2d2; background: #fff; color: var(--ink); }
+    .secondary:hover:not(:disabled) { background: var(--raised); }
+    button:disabled { cursor: not-allowed; opacity: .46; }
+    .connection-state { display: flex; align-items: center; gap: 8px; min-height: 32px; margin-top: 6px; color: var(--muted); font-size: 13px; }
+    .signal { width: 9px; height: 9px; flex: 0 0 9px; border-radius: 50%; background: #7c8585; }
+    .signal.online { background: var(--green); }
+    .signal.error { background: var(--red); }
+    .notice { margin: -12px 0 24px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .columns { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, .85fr); gap: 24px; align-items: start; }
+    .section { min-width: 0; }
+    .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--rule); padding-bottom: 10px; margin-bottom: 14px; }
+    h2 { margin: 0; font-size: 16px; font-weight: 600; }
+    .section-note { color: var(--muted); font-size: 12px; }
+    .mode-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 0 16px; border-bottom: 1px solid var(--rule); }
+    .mode-label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 3px; }
+    .mode-value { font-size: 17px; font-weight: 500; }
+    .mode-detail { color: var(--muted); font-size: 13px; text-align: right; }
+    .cross-wrap { display: grid; grid-template-columns: 1fr 112px 1fr; grid-template-rows: 72px 112px 72px; gap: 8px; align-items: stretch; justify-items: stretch; padding: 18px 0 22px; }
+    .approach { display: flex; flex-direction: column; justify-content: center; align-items: center; min-width: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--raised); color: var(--ink); text-align: center; }
+    .approach strong { font-size: 14px; font-weight: 600; }
+    .lamp { width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: #d6dddd; }
+    .approach.open .lamp { background: var(--green); }
+    .approach.attention .lamp { background: #c27812; }
+    .approach.closed .lamp { background: var(--red); }
+    .north { grid-column: 2; grid-row: 1; }
+    .west { grid-column: 1; grid-row: 2; }
+    .center { grid-column: 2; grid-row: 2; display: grid; place-items: center; background: #eef2f2; color: #546061; border-radius: 6px; font-size: 12px; text-align: center; padding: 8px; line-height: 1.35; }
+    .east { grid-column: 3; grid-row: 2; }
+    .south { grid-column: 2; grid-row: 3; }
+    .action-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .action { min-height: 58px; padding: 8px 12px; border: 1px solid #cbd2d2; background: white; color: var(--ink); text-align: left; line-height: 1.25; }
+    .action span { display: block; color: var(--muted); font-size: 12px; font-weight: 400; margin-top: 3px; }
+    .action:hover:not(:disabled) { border-color: #829394; background: var(--raised); }
+    .action.attention-action { border-color: #dbb27a; background: #fffaf2; }
+    .action.attention-action:hover:not(:disabled) { background: #fff2dc; }
+    .action.auto-action { grid-column: 1 / -1; min-height: 46px; text-align: center; background: #f4f6f6; }
+    .feedback { min-height: 22px; margin: 12px 0 0; color: var(--muted); font-size: 13px; }
+    .feed { margin-top: 22px; }
+    .feed-list { display: grid; gap: 0; }
+    .feed-row { display: grid; grid-template-columns: 76px 1fr; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--rule); font-size: 13px; }
+    .feed-row time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .feed-empty { color: var(--muted); padding: 10px 0; font-size: 13px; }
+    .security-note { margin: 20px 0 0; padding-top: 13px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 12px; line-height: 1.5; }
+    @media (max-width: 820px) {
+      .app-frame { padding: 0; background: var(--paper); }
+      .topbar { height: 48px; padding: 0 16px; background: var(--frame); }
+      main { min-height: calc(100vh - 48px); margin: 0; padding: 22px 18px 32px; border: 0; border-radius: 0; }
+      .intro { display: block; }
+      .connection { max-width: none; margin-top: 20px; }
+      .columns { grid-template-columns: 1fr; gap: 30px; }
+      .cross-wrap { max-width: 420px; margin: 0 auto; }
+      .notice { margin-top: -7px; }
+    }
+    @media (max-width: 420px) {
+      main { padding-right: 16px; padding-left: 16px; }
+      .top-meta { font-size: 12px; }
+      h1 { font-size: 23px; }
+      .connection-form { grid-template-columns: 1fr; }
+      .connection-form .primary, .connection-form .secondary { min-height: 44px; }
+      .credentials { grid-template-columns: 1fr; }
+      .cross-wrap { grid-template-columns: 1fr 86px 1fr; grid-template-rows: 64px 86px 64px; gap: 6px; }
+      .action-list { grid-template-columns: 1fr; }
+      .action.auto-action { grid-column: auto; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+  </style>
+</head>
+<body>
+  <div class="app-frame" data-ui>
+    <header class="topbar">
+      <div class="brand"><span class="mark" aria-hidden="true"></span><span>Semáforos · Maquete</span></div>
+      <div class="top-meta">Painel do operador</div>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <div class="intro-copy">
+          <h1 id="page-title">Painel de operação</h1>
+          <p>Envie uma solicitação de prioridade ou coloque o cruzamento em atenção. O estado exibido abaixo vem das mensagens recebidas do ESP32.</p>
+        </div>
+
+        <form class="connection" id="connection-form">
+          <div class="connection-form">
+            <div class="field">
+              <label for="host">Endereço do broker</label>
+              <input id="host" name="host" value="mcf152fe.ala.us-east-1.emqxsl.com" autocomplete="url" required>
+            </div>
+            <button class="primary" id="connect-button" type="submit">Conectar</button>
+          </div>
+          <div class="credentials">
+            <div class="field">
+              <label for="username">Usuário MQTT</label>
+              <input id="username" name="username" autocomplete="username" required>
+            </div>
+            <div class="field">
+              <label for="password">Senha MQTT</label>
+              <input id="password" name="password" type="password" autocomplete="current-password" required>
+            </div>
+          </div>
+          <div class="connection-state" role="status" aria-live="polite">
+            <span class="signal" id="connection-signal"></span>
+            <span id="connection-text">Desconectado</span>
+            <button class="secondary" id="disconnect-button" type="button" hidden>Desconectar</button>
+          </div>
+        </form>
+      </section>
+
+      <p class="notice">A senha é usada apenas nesta sessão do navegador e não é salva pelo painel. Use esta versão como protótipo privado de maquete.</p>
+
+      <div class="columns">
+        <section class="section" aria-labelledby="state-title">
+          <div class="section-head">
+            <h2 id="state-title">Estado do cruzamento</h2>
+            <span class="section-note" id="state-time">Aguardando ESP32</span>
+          </div>
+          <div class="mode-line">
+            <div><span class="mode-label">Modo recebido</span><span class="mode-value" id="mode-value">Sem estado</span></div>
+            <div class="mode-detail" id="mode-detail">O ESP32 ainda não publicou estado.</div>
+          </div>
+          <div class="cross-wrap" aria-label="Representação esquemática das quatro vias">
+            <div class="approach north" data-via="norte"><strong>Norte</strong><span class="lamp"></span></div>
+            <div class="approach west" data-via="oeste"><strong>Oeste</strong><span class="lamp"></span></div>
+            <div class="center">CRUZAMENTO<br>4 VIAS</div>
+            <div class="approach east" data-via="leste"><strong>Leste</strong><span class="lamp"></span></div>
+            <div class="approach south" data-via="sul"><strong>Sul</strong><span class="lamp"></span></div>
+          </div>
+          <p class="security-note">A representação só muda quando chegar uma mensagem em <code>cruzamento/v1/estado</code>; apertar um comando não confirma que o ESP32 o executou.</p>
+        </section>
+
+        <section class="section" aria-labelledby="commands-title">
+          <div class="section-head">
+            <h2 id="commands-title">Enviar comando</h2>
+            <span class="section-note">Publica em <code>cruzamento/v1/comando</code></span>
+          </div>
+          <div class="action-list">
+            <button class="action command-button" type="button" data-action="ambulancia" data-via="norte" disabled>Prioridade Norte<span>Solicitar abertura da via Norte</span></button>
+            <button class="action command-button" type="button" data-action="ambulancia" data-via="sul" disabled>Prioridade Sul<span>Solicitar abertura da via Sul</span></button>
+            <button class="action command-button" type="button" data-action="ambulancia" data-via="leste" disabled>Prioridade Leste<span>Solicitar abertura da via Leste</span></button>
+            <button class="action command-button" type="button" data-action="ambulancia" data-via="oeste" disabled>Prioridade Oeste<span>Solicitar abertura da via Oeste</span></button>
+            <button class="action attention-action command-button" type="button" data-action="atencao" disabled>Atenção<span>Solicitar todos os sentidos amarelos</span></button>
+            <button class="action auto-action command-button" type="button" data-action="automatico" disabled>Retomar ciclo automático</button>
+          </div>
+          <p class="feedback" id="feedback" role="status" aria-live="polite">Conecte-se para habilitar os comandos.</p>
+
+          <section class="feed" aria-labelledby="events-title">
+            <div class="section-head">
+              <h2 id="events-title">Mensagens recebidas</h2>
+              <span class="section-note">Eventos e estado</span>
+            </div>
+            <div class="feed-list" id="feed-list"><div class="feed-empty">Nenhuma mensagem recebida nesta sessão.</div></div>
+          </section>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    (() => {
+      const hostInput = document.querySelector('#host');
+      const usernameInput = document.querySelector('#username');
+      const passwordInput = document.querySelector('#password');
+      const form = document.querySelector('#connection-form');
+      const connectButton = document.querySelector('#connect-button');
+      const disconnectButton = document.querySelector('#disconnect-button');
+      const connectionText = document.querySelector('#connection-text');
+      const connectionSignal = document.querySelector('#connection-signal');
+      const feedback = document.querySelector('#feedback');
+      const feedList = document.querySelector('#feed-list');
+      const commandButtons = [...document.querySelectorAll('.command-button')];
+      let client = null;
+      let messageCount = 0;
+
+      const viaNames = { norte: 'Norte', sul: 'Sul', leste: 'Leste', oeste: 'Oeste' };
+
+      function setConnected(connected, message, kind = '') {
+        connectionText.textContent = message;
+        connectionSignal.className = `signal ${kind}`.trim();
+        connectButton.disabled = connected;
+        disconnectButton.hidden = !connected;
+        commandButtons.forEach((button) => { button.disabled = !connected; });
+      }
+
+      function addFeed(topic, body) {
+        const empty = feedList.querySelector('.feed-empty');
+        if (empty) empty.remove();
+        const row = document.createElement('div');
+        row.className = 'feed-row';
+        const time = document.createElement('time');
+        time.textContent = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const text = document.createElement('div');
+        text.textContent = `${topic} · ${body}`;
+        row.append(time, text);
+        feedList.prepend(row);
+        while (feedList.children.length > 5) feedList.lastElementChild.remove();
+      }
+
+      function showState(payload) {
+        const mode = payload.modo;
+        const via = payload.via;
+        const modeValue = document.querySelector('#mode-value');
+        const modeDetail = document.querySelector('#mode-detail');
+        const stateTime = document.querySelector('#state-time');
+        document.querySelectorAll('.approach').forEach((node) => node.classList.remove('open', 'attention', 'closed'));
+
+        if (mode === 'transicao') {
+          const destination = payload.destino === 'ambulancia' ? 'prioridade de ambulância'
+            : payload.destino === 'atencao' ? 'modo Atenção'
+            : 'ciclo automático';
+          modeValue.textContent = 'Troca segura';
+          modeDetail.textContent = viaNames[via]
+            ? `Todos vermelhos · próximo: ${viaNames[via]} (${destination})`
+            : `Todos vermelhos · próximo: ${destination}`;
+          document.querySelectorAll('.approach').forEach((node) => node.classList.add('closed'));
+        } else if (mode === 'ambulancia' && viaNames[via]) {
+          modeValue.textContent = 'Prioridade de via';
+          modeDetail.textContent = `Via ${viaNames[via]} informada pelo ESP32`;
+          document.querySelector(`[data-via="${via}"]`)?.classList.add('open');
+          ['norte', 'sul', 'leste', 'oeste'].filter((name) => name !== via).forEach((name) => document.querySelector(`[data-via="${name}"]`)?.classList.add('closed'));
+        } else if (mode === 'atencao') {
+          modeValue.textContent = 'Atenção';
+          modeDetail.textContent = 'Todos os sentidos em amarelo';
+          document.querySelectorAll('.approach').forEach((node) => node.classList.add('attention'));
+        } else if (mode === 'automatico') {
+          modeValue.textContent = 'Ciclo automático';
+          modeDetail.textContent = viaNames[via] ? `${viaNames[via]} · ${payload.etapa || 'etapa não informada'}` : 'Ciclo normal informado pelo ESP32';
+          if (viaNames[via]) {
+            document.querySelector(`[data-via="${via}"]`)?.classList.add(payload.etapa === 'amarelo' ? 'attention' : 'open');
+            ['norte', 'sul', 'leste', 'oeste'].filter((name) => name !== via).forEach((name) => document.querySelector(`[data-via="${name}"]`)?.classList.add('closed'));
+          }
+        } else {
+          modeValue.textContent = 'Estado recebido';
+          modeDetail.textContent = 'Mensagem recebida; formato de estado ainda não reconhecido.';
+        }
+        stateTime.textContent = `Atualizado às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+      }
+
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (typeof mqtt === 'undefined') {
+          setConnected(false, 'Biblioteca MQTT não carregou.', 'error');
+          return;
+        }
+        const host = hostInput.value.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
+        const username = usernameInput.value.trim();
+        const password = passwordInput.value;
+        if (!host || !username || !password) return;
+
+        if (client) client.end(true);
+        setConnected(false, 'Conectando…');
+        client = mqtt.connect(`wss://${host}:8084/mqtt`, {
+          clientId: `painel-${Math.random().toString(16).slice(2, 12)}`,
+          username,
+          password,
+          clean: true,
+          connectTimeout: 10000,
+          reconnectPeriod: 3000,
+          keepalive: 30,
+          protocolVersion: 4
+        });
+
+        client.on('connect', () => {
+          setConnected(true, 'Conectado ao broker.', 'online');
+          feedback.textContent = 'Conectado. Os comandos estão habilitados.';
+          client.subscribe(['cruzamento/v1/estado', 'cruzamento/v1/evento'], { qos: 0 }, (error) => {
+            if (error) feedback.textContent = 'Conectou, mas não conseguiu assinar os tópicos de retorno.';
+          });
+        });
+        client.on('reconnect', () => setConnected(false, 'Reconectando…'));
+        client.on('offline', () => setConnected(false, 'Sem conexão. Tentando reconectar…'));
+        client.on('error', () => {
+          setConnected(false, 'Falha ao conectar. Confira endereço, usuário, senha e internet.', 'error');
+        });
+        client.on('message', (topic, message) => {
+          const raw = message.toString();
+          addFeed(topic, raw);
+          if (topic === 'cruzamento/v1/estado') {
+            try { showState(JSON.parse(raw)); }
+            catch { feedback.textContent = 'O ESP32 publicou um estado que não está em JSON válido.'; }
+          }
+        });
+      });
+
+      disconnectButton.addEventListener('click', () => {
+        if (client) client.end(true);
+        client = null;
+        passwordInput.value = '';
+        setConnected(false, 'Desconectado.');
+        feedback.textContent = 'Conecte-se para habilitar os comandos.';
+      });
+
+      commandButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          if (!client || !client.connected) return;
+          const action = button.dataset.action;
+          const via = button.dataset.via;
+          const payload = action === 'ambulancia' ? { acao: action, via } : { acao: action };
+          client.publish('cruzamento/v1/comando', JSON.stringify(payload), { qos: 0, retain: false }, (error) => {
+            if (error) feedback.textContent = 'Não foi possível publicar o comando.';
+            else feedback.textContent = `Comando enviado: ${JSON.stringify(payload)}. Aguardando confirmação de estado do ESP32.`;
+          });
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
