@@ -97,8 +97,16 @@
     .feedback { min-height: 22px; margin: 12px 0 0; color: var(--muted); font-size: 13px; }
     .feed { margin-top: 22px; }
     .feed-list { display: grid; gap: 0; }
-    .feed-row { display: grid; grid-template-columns: 76px 1fr; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--rule); font-size: 13px; }
+    .feed-row { display: grid; grid-template-columns: 76px 9px 1fr; gap: 12px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--rule); }
     .feed-row time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .feed-mark { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: #788487; }
+    .feed-mark.open { background: var(--green); }
+    .feed-mark.priority { background: #197b51; }
+    .feed-mark.attention { background: #c27812; }
+    .feed-mark.transition { background: #788487; }
+    .feed-copy { display: grid; gap: 2px; min-width: 0; }
+    .feed-title { color: var(--ink); font-size: 14px; font-weight: 600; line-height: 1.35; }
+    .feed-detail { color: var(--muted); font-size: 12px; line-height: 1.4; }
     .feed-empty { color: var(--muted); padding: 10px 0; font-size: 13px; }
     .security-note { margin: 20px 0 0; padding-top: 13px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 12px; line-height: 1.5; }
     @media (max-width: 820px) {
@@ -121,6 +129,7 @@
       .cross-wrap { grid-template-columns: 1fr 86px 1fr; grid-template-rows: 64px 86px 64px; gap: 6px; }
       .action-list { grid-template-columns: 1fr; }
       .action.auto-action { grid-column: auto; }
+      .feed-row { grid-template-columns: 58px 8px 1fr; gap: 8px; }
     }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
   </style>
@@ -204,8 +213,8 @@
 
           <section class="feed" aria-labelledby="events-title">
             <div class="section-head">
-              <h2 id="events-title">Mensagens recebidas</h2>
-              <span class="section-note">Eventos e estado</span>
+              <h2 id="events-title">Histórico do cruzamento</h2>
+              <span class="section-note">Atualizações confirmadas pelo ESP32</span>
             </div>
             <div class="feed-list" id="feed-list"><div class="feed-empty">Nenhuma mensagem recebida nesta sessão.</div></div>
           </section>
@@ -240,18 +249,64 @@
         commandButtons.forEach((button) => { button.disabled = !connected; });
       }
 
-      function addFeed(topic, body) {
+      function addFeed(title, detail, kind = '') {
         const empty = feedList.querySelector('.feed-empty');
         if (empty) empty.remove();
         const row = document.createElement('div');
         row.className = 'feed-row';
         const time = document.createElement('time');
         time.textContent = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        const text = document.createElement('div');
-        text.textContent = `${topic} · ${body}`;
-        row.append(time, text);
+        const mark = document.createElement('span');
+        mark.className = `feed-mark ${kind}`.trim();
+        mark.setAttribute('aria-hidden', 'true');
+        const copy = document.createElement('div');
+        copy.className = 'feed-copy';
+        const heading = document.createElement('strong');
+        heading.className = 'feed-title';
+        heading.textContent = title;
+        const explanation = document.createElement('span');
+        explanation.className = 'feed-detail';
+        explanation.textContent = detail;
+        copy.append(heading, explanation);
+        row.append(time, mark, copy);
         feedList.prepend(row);
         while (feedList.children.length > 5) feedList.lastElementChild.remove();
+      }
+
+      function describeState(payload) {
+        const via = viaNames[payload.via];
+
+        if (payload.modo === 'transicao') {
+          if (payload.destino === 'ambulancia') {
+            return {
+              title: 'Transição segura',
+              detail: via ? `Todos vermelhos. Preparando prioridade para a via ${via}.` : 'Todos vermelhos antes da prioridade.',
+              kind: 'transition'
+            };
+          }
+          if (payload.destino === 'atencao') {
+            return { title: 'Transição segura', detail: 'Todos vermelhos antes de ativar Atenção.', kind: 'transition' };
+          }
+          return {
+            title: 'Transição segura',
+            detail: via ? `Todos vermelhos. Retomando o ciclo pela via ${via}.` : 'Todos vermelhos antes de retomar o ciclo.',
+            kind: 'transition'
+          };
+        }
+
+        if (payload.modo === 'ambulancia' && via) {
+          return { title: `Via ${via} aberta`, detail: 'Prioridade de ambulância', kind: 'priority' };
+        }
+        if (payload.modo === 'atencao') {
+          return { title: 'Modo Atenção ativado', detail: 'Todos os semáforos estão amarelos.', kind: 'attention' };
+        }
+        if (payload.modo === 'automatico' && via && payload.etapa === 'verde') {
+          return { title: `Via ${via} aberta`, detail: 'Ciclo automático', kind: 'open' };
+        }
+        if (payload.modo === 'automatico' && via && payload.etapa === 'amarelo') {
+          return { title: `Via ${via} em amarelo`, detail: 'O sinal vai fechar.', kind: 'attention' };
+        }
+        return { title: 'Estado atualizado', detail: 'O ESP32 enviou uma atualização do cruzamento.', kind: '' };
       }
 
       function showState(payload) {
@@ -272,8 +327,8 @@
             : `Todos vermelhos · próximo: ${destination}`;
           document.querySelectorAll('.approach').forEach((node) => node.classList.add('closed'));
         } else if (mode === 'ambulancia' && viaNames[via]) {
-          modeValue.textContent = 'Prioridade de via';
-          modeDetail.textContent = `Via ${viaNames[via]} informada pelo ESP32`;
+          modeValue.textContent = `Via ${viaNames[via]} aberta`;
+          modeDetail.textContent = 'Prioridade de ambulância';
           document.querySelector(`[data-via="${via}"]`)?.classList.add('open');
           ['norte', 'sul', 'leste', 'oeste'].filter((name) => name !== via).forEach((name) => document.querySelector(`[data-via="${name}"]`)?.classList.add('closed'));
         } else if (mode === 'atencao') {
@@ -282,7 +337,10 @@
           document.querySelectorAll('.approach').forEach((node) => node.classList.add('attention'));
         } else if (mode === 'automatico') {
           modeValue.textContent = 'Ciclo automático';
-          modeDetail.textContent = viaNames[via] ? `${viaNames[via]} · ${payload.etapa || 'etapa não informada'}` : 'Ciclo normal informado pelo ESP32';
+          const estadoVia = payload.etapa === 'verde' ? 'aberta'
+            : payload.etapa === 'amarelo' ? 'em amarelo'
+            : payload.etapa || 'estado não informado';
+          modeDetail.textContent = viaNames[via] ? `Via ${viaNames[via]} ${estadoVia}` : 'Ciclo automático informado pelo ESP32';
           if (viaNames[via]) {
             document.querySelector(`[data-via="${via}"]`)?.classList.add(payload.etapa === 'amarelo' ? 'attention' : 'open');
             ['norte', 'sul', 'leste', 'oeste'].filter((name) => name !== via).forEach((name) => document.querySelector(`[data-via="${name}"]`)?.classList.add('closed'));
@@ -332,10 +390,18 @@
         });
         client.on('message', (topic, message) => {
           const raw = message.toString();
-          addFeed(topic, raw);
           if (topic === 'cruzamento/v1/estado') {
-            try { showState(JSON.parse(raw)); }
-            catch { feedback.textContent = 'O ESP32 publicou um estado que não está em JSON válido.'; }
+            try {
+              const payload = JSON.parse(raw);
+              showState(payload);
+              const description = describeState(payload);
+              addFeed(description.title, description.detail, description.kind);
+            } catch {
+              feedback.textContent = 'O ESP32 publicou um estado que não está em JSON válido.';
+              addFeed('Estado inválido', 'Não foi possível interpretar a mensagem do ESP32.');
+            }
+          } else if (topic === 'cruzamento/v1/evento') {
+            addFeed('Evento recebido', 'O ESP32 enviou uma atualização.', 'transition');
           }
         });
       });
